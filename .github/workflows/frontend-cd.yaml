@@ -121,4 +121,4 @@ jobs:
         working-directory: starter/frontend/k8s
         run: |
           kustomize edit set image frontend=066968432975.dkr.ecr.us-east-1.amazonaws.com/frontend:${{ github.sha }}
-          kustomize build | kubectl apply -f -New-Item .github\workflows\backend-cd.yaml
+          kustomize build | kubectl apply -f -
