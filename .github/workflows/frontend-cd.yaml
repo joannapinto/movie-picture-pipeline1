@@ -59,7 +59,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, test]
     env:
-      REACT_APP_MOVIE_API_URL: http://localhost:5000
+      env:
+  REACT_APP_MOVIE_API_URL: http://a19238b0e81d94223b02197da32e6bba-1266631624.us-east-1.elb.amazonaws.com
 
     steps:
       - name: Checkout code
