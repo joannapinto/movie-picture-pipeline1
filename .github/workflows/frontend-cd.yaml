@@ -1,11 +1,11 @@
-name: Frontend Continuous Deployment
+name: Backend Continuous Deployment
 
 on:
   push:
     branches:
       - main
     paths:
-      - "starter/frontend/**"
+      - "starter/backend/**"
   workflow_dispatch:
 
 jobs:
@@ -13,81 +13,65 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: starter/frontend
+        working-directory: starter/backend
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version-file: starter/frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: starter/frontend/package-lock.json
+          python-version: "3.10"
+
+      - name: Install pipenv
+        run: pip install pipenv
 
       - name: Install dependencies
-        run: npm ci
+        run: pipenv install --dev
 
       - name: Run lint
-        run: npm run lint
+        run: pipenv run lint
 
   test:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: starter/frontend
+        working-directory: starter/backend
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version-file: starter/frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: starter/frontend/package-lock.json
+          python-version: "3.10"
+
+      - name: Install pipenv
+        run: pip install pipenv
 
       - name: Install dependencies
-        run: npm ci
+        run: pipenv install --dev
 
       - name: Run tests
-        run: npm test -- --watchAll=false
+        run: pipenv run test
 
   build:
     runs-on: ubuntu-latest
     needs: [lint, test]
-    env:
-       REACT_APP_MOVIE_API_URL: http://a19238b0e81d94223b02197da32e6bba-1266631624.us-east-1.elb.amazonaws.com
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: starter/frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: starter/frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: starter/frontend
-        run: npm ci
-
-      - name: Run tests
-        working-directory: starter/frontend
-        run: npm test -- --watchAll=false
-
       - name: Build Docker image
-        working-directory: starter/frontend
+        working-directory: starter/backend
         run: |
           docker build \
-            --build-arg REACT_APP_MOVIE_API_URL=${REACT_APP_MOVIE_API_URL} \
-            --tag mp-frontend:${{ github.sha }} \
+            --tag mp-backend:${{ github.sha }} \
             .
-          
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -100,11 +84,26 @@ jobs:
 
       - name: Push image to ECR
         run: |
-          docker tag mp-frontend:${{ github.sha }} \
-            066968432975.dkr.ecr.us-east-1.amazonaws.com/frontend:${{ github.sha }}
+          docker tag mp-backend:${{ github.sha }} \
+            066968432975.dkr.ecr.us-east-1.amazonaws.com/backend:${{ github.sha }}
 
           docker push \
-            066968432975.dkr.ecr.us-east-1.amazonaws.com/frontend:${{ github.sha }}
+            066968432975.dkr.ecr.us-east-1.amazonaws.com/backend:${{ github.sha }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
@@ -117,8 +116,20 @@ jobs:
             --name cluster \
             --region us-east-1
 
-      - name: Deploy frontend
-        working-directory: starter/frontend/k8s
+      - name: Deploy backend
+        working-directory: starter/backend/k8s
         run: |
-          kustomize edit set image frontend=066968432975.dkr.ecr.us-east-1.amazonaws.com/frontend:${{ github.sha }}
+          kustomize edit set image backend=066968432975.dkr.ecr.us-east-1.amazonaws.com/backend:${{ github.sha }}
           kustomize build | kubectl apply -f -
+
+      - name: Wait for backend rollout
+        run: |
+          kubectl rollout status deployment/backend --timeout=180s
+
+      - name: Deployment Summary
+        run: |
+          echo "## Backend Deployment Successful 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** backend" >> $GITHUB_STEP_SUMMARY
+          echo "**Endpoint:** /movies" >> $GITHUB_STEP_SUMMARY
